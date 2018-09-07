@@ -1,0 +1,1 @@
+/home/noskill/projects/models/vqa_dataset/atomspace.scm

@@ -32,3 +32,15 @@ class FeatureExtractor(ABC):
     
     def getFeaturesByImageId(self, imageId):
         pass
+
+
+class MultiDnn(NeuralNetworkRunner):
+
+    def runNeuralNetwork(self, features, word):
+        model = self.netsVocabulary.getModelByWord(word)
+        if model is None:
+            self.logger.debug('no model found, return FALSE')
+            return torch.zeros(1)
+        # TODO: F.sigmoid should part of NN
+        return F.sigmoid(model(torch.Tensor(features)))
+
