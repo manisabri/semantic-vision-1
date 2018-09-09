@@ -14,6 +14,8 @@ from util import *
 from interface import FeatureExtractor, AnswerHandler
 from multidnn import NetsVocabularyNeuralNetworkRunner
 from hypernet import HyperNetNeuralNetworkRunner
+from splitnet.splitmultidnnmodel import SplitMultidnnRunner
+
 
 sys.path.insert(0, currentDir(__file__) + '/../question2atomese')
 from record import Record
@@ -244,6 +246,7 @@ class PatternMatcherVqaPipeline:
         self.answerQuestion(questionRecord)
     
     def answerQuestionsFromFile(self, questionsFileName):
+        import pdb;pdb.set_trace()
         questionFile = open(questionsFileName, 'r')
         for line in questionFile:
             try:
@@ -262,8 +265,8 @@ parser = argparse.ArgumentParser(description='Load pretrained words models '
    'and answer questions using OpenCog PatternMatcher')
 parser.add_argument('--model-kind', '-k', dest='kindOfModel',
     action='store', type=str, required=True,
-    choices=['MULTIDNN', 'HYPERNET'],
-    help='model kind: (1) MULTIDNN requires --model parameter only; '
+    choices=['MULTIDNN', 'HYPERNET', 'SPLITMULTIDNN'],
+    help='model kind: (1) MULTIDNN and SPLITMULTIDNN requires --model parameter only; '
     '(2) HYPERNET requires --model, --words and --embedding parameters')
 parser.add_argument('--questions', '-q', dest='questionsFileName',
     action='store', type=str, required=True,
@@ -348,6 +351,8 @@ try:
     
     if (args.kindOfModel == 'MULTIDNN'):
         neuralNetworkRunner = NetsVocabularyNeuralNetworkRunner(args.multidnnModelFileName)
+    elif (args.kindOfModel == 'SPLITMULTIDNN'):
+        neuralNetworkRunner = SplitMultidnnRunner(args.multidnnModelFileName)
     elif (args.kindOfModel == 'HYPERNET'):
         neuralNetworkRunner = HyperNetNeuralNetworkRunner(args.hypernetWordsFileName,
                         args.hypernetWordEmbeddingsFileName, args.hypernetModelFileName)

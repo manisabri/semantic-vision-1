@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 python3 pattern_matcher_vqa.py \
-    --questions /home/noskill/projects/semantic-vision-1/experiments/opencog/pattern_matcher_vqa/test_question.txt \
-    --model-kind MULTIDNN \
+    --questions test_question.txt \
+    --model-kind SPLITMULTIDNN \
     --atomspace atomspace.scm \
-    --multidnn-model /home/noskill/projects/models/multi/model_01_max_score_val.pth.tar \
+    --multidnn-model /home/noskill/projects/models/multi/visual_genome \
     --features-extractor-kind PRECALCULATED \
     --precalculated-features /home/noskill/projects/models/features/val2014_parsed_features.zip \
     --precalculated-features-prefix val2014_parsed_features/COCO_val2014_ \
-    --python-log-level INFO \
+    --python-log-level DEBUG \
     --opencog-log-level NONE
 

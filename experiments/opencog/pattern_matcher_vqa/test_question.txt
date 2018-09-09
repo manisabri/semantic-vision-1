@@ -1,3 +1,1 @@
-11760004::yes/no::Are the zebras fat?::11760::yes::_predadj(A, B)::_predadj(zebra, fat)
-527510002::other::What color is the plane?::527510::silver::_det(A, B);_obj(C, D);_subj(C, A)::_det(color, _$qVar);_obj(be, plane);_subj(be, color)
-299838003::other::What color is the ball?::299838::yellow::_det(A, B);_obj(C, D);_subj(C, A)::_det(color, _$qVar);_obj(be, ball);_subj(be, color)
+425722010::yes/no::Is this area a desert?::425722::no::None::None

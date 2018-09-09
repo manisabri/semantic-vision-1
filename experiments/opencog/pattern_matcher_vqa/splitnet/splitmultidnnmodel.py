@@ -1,7 +1,7 @@
+import json
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
+import os
 import glob
 import re
 import sys
@@ -9,7 +9,7 @@ import logging
 
 from splitnet.dictionary import Dictionary
 
-from interface import MultiDnn
+from interface import NeuralNetworkRunner
 
 sys.path.insert(0, os.path.dirname(__file__) + '/../../DNNs/vqa_multi_dnn')
 from netsvocabulary import INetsVocab
@@ -27,6 +27,7 @@ class SplitNetsVocab(INetsVocab):
                                          prefix='best_loss_model',
                                          device=device)
         self.thresholds_by_id = self.load_threshold(models_directory)
+
 
     def create_networks(self, all_words, device):
         nets = dict()
@@ -51,9 +52,8 @@ class SplitNetsVocab(INetsVocab):
     def set_all_train(self, nets, is_train):
         for k in nets:
             nets[k].train(is_train)
-    
-    
-    def load_models(path_to_models, prefix, device):    
+
+    def load_models(self, path_to_models, prefix, device):
         list_of_files = glob.glob(path_to_models + "/" + prefix + "_*.pth")
         list_of_words = []
         for f in list_of_files:
@@ -103,4 +103,3 @@ class SplitMultidnnRunner(NeuralNetworkRunner):
         delta = threshold - 0.5
         result = model(torch.Tensor(features))
         return result - delta
-
