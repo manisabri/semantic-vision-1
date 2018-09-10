@@ -14,7 +14,10 @@ class AnswerHandler(ABC):
     
     def onAnswer(self, record, answer):
         pass
-    
+
+    def get_unanswered(self):
+        return list()
+
 
 class ChainAnswerHandler(AnswerHandler):
     
@@ -35,3 +38,7 @@ class FeatureExtractor(ABC):
     
     def getFeaturesByImageId(self, imageId):
         pass
+
+
+class NoModelException(RuntimeError):
+    pass

@@ -9,10 +9,13 @@ import logging
 
 from splitnet.dictionary import Dictionary
 
-from interface import NeuralNetworkRunner
+from interface import NeuralNetworkRunner, NoModelException
+import numpy
 
 sys.path.insert(0, os.path.dirname(__file__) + '/../../DNNs/vqa_multi_dnn')
 from netsvocabulary import INetsVocab
+
+logger = logging.getLogger('NetsVocabularyNeuralNetworkRunner')
 
 
 class SplitNetsVocab(INetsVocab):
@@ -27,7 +30,12 @@ class SplitNetsVocab(INetsVocab):
                                          prefix='best_loss_model',
                                          device=device)
         self.thresholds_by_id = self.load_threshold(models_directory)
-
+        model_list = sorted(self.models.keys())
+        th_list = sorted(self.thresholds_by_id.keys())
+        for i in model_list:
+            if i not in th_list:
+                logger.warning("no threshold for {0}".format(i))
+                self.thresholds_by_id[i] = 0.5
 
     def create_networks(self, all_words, device):
         nets = dict()
@@ -82,19 +90,27 @@ class SplitNetsVocab(INetsVocab):
         return result
 
 
+def sigmoid(x):
+    return 1/(1 + numpy.exp(-x))
+
+
 class SplitMultidnnRunner(NeuralNetworkRunner):
 
     def __init__(self, models_directory):
-        self.logger = logging.getLogger('NetsVocabularyNeuralNetworkRunner')
         self.nets_vocabulary = SplitNetsVocab(models_directory)
 
     def runNeuralNetwork(self, features, word):
-        self.logger.warn("processing word {0}".format(word))
-        model = self.nets_vocabulary.get_model_by_word(word)
+        logger.debug("processing word {0}".format(word))
+        try:
+            model = self.nets_vocabulary.get_model_by_word(word)
+        except KeyError as e:
+            logger.debug("No model for word {0}".format(word))
+            model = None
 
         if model is None:
-            self.logger.debug('no model found, return FALSE')
-            return torch.zeros(1)
+            logger.debug('no model found, return FALSE')
+            raise NoModelException("No model for word: {0}".format(word))
+
         # todo: threshold should be part of the model
         threshold = self.nets_vocabulary.get_threshold_by_word(word)
         # use threshold = 0.5 + delta
@@ -102,4 +118,5 @@ class SplitMultidnnRunner(NeuralNetworkRunner):
         # we will check for f(x) - delta > 0.5, where delta = threshold - 0.5
         delta = threshold - 0.5
         result = model(torch.Tensor(features))
-        return result - delta
+        # take max to keep values in valid range (0, 1)
+        return max(torch.tensor(0.0), result - delta)
