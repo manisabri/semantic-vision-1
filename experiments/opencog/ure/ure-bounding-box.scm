@@ -14,25 +14,33 @@
 (define Red (Predicate "Red"))
 
 
-(define (redness box color) (stv 0.64 0.9))
+(define (redness box ) 
+    (display "redness called with: ")
+    (display box)
+    (display "\n")
+    (stv 0.55 (random 1.0)) 
+)
 
 (define RedBox1
     (EvaluationLink
-         (GroundedPredicateNode "scm: redness")
-         (ListLink (TypedVariableLink (Variable "$X")(Type "ConceptNode"))
-                    Red)
+         (GroundedPredicateNode  "scm: redness")
+         (ListLink (
+                    TypedVariableLink (Variable "$X"))
+                    )
     )
 )
 
 (define RedBox2
    (EvaluationLink (stv 0.56 0.7)
          Red
-         (ConceptNode "BB2")
+         (ListLink(
+             ConceptNode "BB2"
+              ))
    )
 )
 
-(define HerringBox1 (Evaluation (stv 0.3 0.8) Herring (ConceptNode "BB1")))
-(define HerringBox2 (Evaluation (stv 0.3 0.8) Herring (ConceptNode "BB2")))
+(define HerringBox1 (Evaluation (stv 0.9 0.8) Herring (ConceptNode "BB1")))
+(define HerringBox2 (Evaluation (stv 0.9 0.8) Herring (ConceptNode "BB2")))
 
 ; need to restrict the search by inheritance link
 (define HerringAndRedBox1 (AndLink RedBox1 HerringBox1 (InheritanceLink (VariableNode "$X") (ConceptNode "BoundingBox")) ) )
@@ -51,9 +59,9 @@
     result
 )
 
-(ure-logger-set-level! "debug")
-(cog-logger-set-level! "debug")
+(ure-logger-set-level! "trace")
+(cog-logger-set-level! "trace")
 (ure-set-num-parameter conjunction-rule-base "URE:maximum-iterations" 20)
 (run-bc HerringAndRedBox1)
-(run-bc HerringAndRedBox2)
+;(run-bc HerringAndRedBox2)
 
