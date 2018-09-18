@@ -1,0 +1,1 @@
+425722010::yes/no::Is this area a desert?::425722::no::None::None

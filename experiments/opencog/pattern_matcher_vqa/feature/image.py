@@ -1,5 +1,6 @@
 import sys
 import numpy as np
+import numpy
 import cv2
 import caffe
 from fast_rcnn.test import im_detect,_get_blobs
@@ -24,13 +25,13 @@ class ImageFeatureExtractor(FeatureExtractor):
     
     def initFeatureExtractingNetwork(self):
         caffe.set_mode_cpu()
-        return caffe.Net(self.prototxt, caffe.TEST, weights=self.weights)
+        return caffe.Net(self.prototxt, self.weights, caffe.TEST)
     
     def getImageFileName(self, imageId):
         return self.imagePrefix + addLeadingZeros(imageId, 12) + '.jpg'
 
     def loadImageUsingFileHandle(self, fileHandle):
-        data = np.asarray(bytearray(fileHandle.read()), dtype=np.uint8)
+        data = numpy.asarray(bytearray(fileHandle.read()), dtype=numpy.uint8)
         return cv2.imdecode(data, cv2.IMREAD_COLOR)
     
     def loadImageByFileName(self, imageFileName):

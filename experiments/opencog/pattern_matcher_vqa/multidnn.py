@@ -6,8 +6,10 @@ import torch.nn.functional as F
 from util import *
 from interface import NeuralNetworkRunner
 
+
 sys.path.insert(0, currentDir(__file__) + '/../DNNs/vqa_multi_dnn')
 from netsvocabulary import NetsVocab
+
 
 class NetsVocabularyNeuralNetworkRunner(NeuralNetworkRunner):
     
@@ -21,7 +23,7 @@ class NetsVocabularyNeuralNetworkRunner(NeuralNetworkRunner):
         netsVocabulary = NetsVocab.fromStateDict(device, checkpoint['state_dict'])
         netsVocabulary.train(False)
         return netsVocabulary
-    
+
     def runNeuralNetwork(self, features, word):
         model = self.netsVocabulary.getModelByWord(word)
         if model is None:
