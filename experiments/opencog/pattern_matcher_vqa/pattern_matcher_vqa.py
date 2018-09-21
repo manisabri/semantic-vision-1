@@ -6,6 +6,7 @@ import argparse
 import jpype
 import numpy as np
 import opencog.logger
+import network_runner
 
 from opencog.atomspace import TruthValue
 from opencog.type_constructors import *
@@ -21,6 +22,7 @@ from splitnet.splitmultidnnmodel import SplitMultidnnRunner
 sys.path.insert(0, currentDir(__file__) + '/../question2atomese')
 from record import Record
 
+logger = logging.getLogger(__name__)
 ### Reusable code (no dependency on global vars)
 
 def initializeRootAndOpencogLogger(opencogLogLevel, pythonLogLevel):
@@ -29,25 +31,6 @@ def initializeRootAndOpencogLogger(opencogLogLevel, pythonLogLevel):
     rootLogger = logging.getLogger()
     rootLogger.setLevel(pythonLogLevel)
     rootLogger.addHandler(logging.StreamHandler())
-
-
-def initialize_atomspace(atomspaceFileName=None, load_ure=False):
-    atomspace = scheme_eval_as('(cog-atomspace)')
-    scheme_eval(atomspace, '(use-modules (opencog))')
-    scheme_eval(atomspace, '(use-modules (opencog exec))')
-    scheme_eval(atomspace, '(use-modules (opencog query))')
-    scheme_eval(atomspace, '(use-modules (opencog logger))')
-    scheme_eval(atomspace, '(add-to-load-path ".")')
-    scheme_eval(atomspace, '(cog-logger-set-level! "debug")')
-    if atomspaceFileName is not None:
-        scheme_eval(atomspace, '(load-from-path "' + atomspaceFileName + '")')
-    if load_ure:
-        scheme_eval(atomspace, '(add-to-load-path "/usr/local/share/opencog/scm")')
-        scheme_eval(atomspace, '(add-to-load-path "/home/noskill/projects/opencog/examples/pln/conjunction/")')
-        scheme_eval(atomspace, '(add-to-load-path "/home/noskill/projects/atomspace/examples/rule-engine/rules/")')
-        scheme_eval(atomspace, '(add-to-load-path "/home/noskill/projects/opencog/opencog/pln/rules/")')
-        scheme_eval(atomspace, '(load-from-path "conjunction-rule-base-config.scm")')
-    return atomspace
 
 
 def pushAtomspace(parentAtomspace):
@@ -119,12 +102,15 @@ class StatisticsAnswerHandler(AnswerHandler):
     def unanswered_percent(self):
         return self.dont_know / self.questionsAnswered * 100
 
+    def getUnanswered(self):
+        return self._dont_know_queries
+
 
 ### Pipeline code
 
 def runNeuralNetwork(boundingBox, conceptNode):
+    logger = logging.getLogger('runNeuralNetwork')
     try:
-        logger = logging.getLogger('runNeuralNetwork')
         logger.debug('runNeuralNetwork: %s, %s', boundingBox.name, conceptNode.name)
         
         featuresValue = boundingBox.get_value(PredicateNode('features'))
@@ -135,7 +121,7 @@ def runNeuralNetwork(boundingBox, conceptNode):
         word = conceptNode.name
 
         certainty = 1.0
-        global neuralNetworkRunner
+        neuralNetworkRunner = network_runner.runner
         try:
             resultTensor = neuralNetworkRunner.runNeuralNetwork(features, word)
         except NoModelException as e:
@@ -183,34 +169,91 @@ class OtherDetSubjObjResult:
 
 
 class PatternMatcherVqaPipeline:
-    
+    header = "questionid::questiontype::question::imageid::answer::shortformula::fullformula"
+
     def __init__(self, featureExtractor, questionConverter, atomspace, answerHandler):
-        self.logger = logging.getLogger('PatternMatcherVqaPipeline')
         self.featureExtractor = featureExtractor
         self.questionConverter = questionConverter
         self.atomspace = atomspace
         self.answerHandler = answerHandler
+        self.formulaQuestionMap = dict()
+        self.logger = logging.getLogger('PatternMatcherVqaPipeline')
+        tmp_map = self.questionConverter.getFormulaQuestionMap()
+        for item in tmp_map.entrySet():
+            self.formulaQuestionMap[item.getKey()] = item.getValue()
 
     # TODO: pass atomspace as parameter to exclude necessity of set_type_ctor_atomspace
-    def addBoundingBoxesIntoAtomspace(self, record):
+    def addBoundingBoxesIntoAtomspace(self, record=None, image=None):
+        """
+        populate atomspace with bounding boxes, that is concept nodes
+        
+        Each bounding box node holds FloatValue, which in turn holds array of float values - 
+        activations of neural network on the corresponding image area.
+        
+        Parameters
+        ----------
+        record : Record
+            record object, holding imageId. Features will be obtained using this id
+        image : numpy.array
+            an image to process. Features will be obtained directly from image
+     
+        Returns
+        -------
+        None 
+        """
+
+        assert (record is None) != (image is None)
+        if image is None:
+            features = self.featureExtractor.getFeaturesByImageId(record.imageId)
+        else:
+            features = self.featureExtractor.getFeaturesByImage(image) 
         boundingBoxNumber = 0
-        for boundingBoxFeatures in self.featureExtractor.getFeaturesByImageId(record.imageId):
+        for boundingBoxFeatures in features:
             imageFeatures = FloatValue(boundingBoxFeatures)
             boundingBoxInstance = ConceptNode(
                 'BoundingBox-' + str(boundingBoxNumber))
             InheritanceLink(boundingBoxInstance, ConceptNode('BoundingBox'))
             boundingBoxInstance.set_value(PredicateNode('features'), imageFeatures)
             boundingBoxNumber += 1
+
+    def get_question_type(self, formula):
+        for formula_key, question_type in self.formulaQuestionMap.items():
+            if formula_key in formula:
+                return question_type 
+        raise NotImplementedError("formula({0}) is not supported yet".format(formula))
+ 
+    def answerQuery(self, questionType, query):
+        if questionType == 'yes/no':
+            answer = self.answerYesNoQuestion(query)
+        else:
+            answer = self.answerOtherQuestion(query)
+        return answer       
+
+    def answerQuestionByImage(self, image, question):
+        self.atomspace = pushAtomspace(self.atomspace)
+        try:
+            self.addBoundingBoxesIntoAtomspace(image=image)
+            relexFormula = self.questionConverter.parseQuestion(question)
+            queryInScheme = self.questionConverter.convertToOpencogScheme(relexFormula)
+            if queryInScheme is None:
+                self.logger.error('Question was not parsed')
+                return
+            self.logger.debug('Scheme query: %s', queryInScheme)
+            questionType = self.get_question_type(relexFormula.fullFormula) 
+            return self.answerQuery(questionType, queryInScheme)
+        finally:
+            self.atomspace = popAtomspace(self.atomspace)
     
+                    
     def answerQuestion(self, record):
         self.logger.debug('processing question: %s', record.question)
         self.answerHandler.onNewQuestion(record)
         # Push/pop atomspace each time to not pollute it by temporary
         # bounding boxes
         self.atomspace = pushAtomspace(self.atomspace)
+        import pdb;pdb.set_trace()
         try:
-            
-            self.addBoundingBoxesIntoAtomspace(record)
+            self.addBoundingBoxesIntoAtomspace(record=record)
             
             relexFormula = self.questionConverter.parseQuestion(record.question)
             queryInScheme = self.questionConverter.convertToOpencogScheme(relexFormula)
@@ -218,11 +261,7 @@ class PatternMatcherVqaPipeline:
                 self.logger.error('Question was not parsed')
                 return
             self.logger.debug('Scheme query: %s', queryInScheme)
-            if record.questionType == 'yes/no':
-                answer = self.answerYesNoQuestion(queryInScheme)
-            else:
-                answer = self.answerOtherQuestion(queryInScheme)
-            
+            answer = self.answerQuery(record.questionType, queryInScheme)
             self.answerHandler.onAnswer(record, answer)
             
             print('{}::{}::{}::{}::{}'.format(record.questionId, record.question, 
@@ -246,12 +285,6 @@ class PatternMatcherVqaPipeline:
         answer = 'yes' if result.to_list()[0] >= 0.5 else 'no'
         return answer
 
-    def get_query(self, query, use_ure=False):
-        #return """(define result (conj-bc (AndLink(InheritanceLink (VariableNode "$X") (ConceptNode "BoundingBox"))(EvaluationLink (GroundedPredicateNode "py:runNeuralNetwork") (ListLink (VariableNode "$X") (ConceptNode "_$qVar")) )(EvaluationLink (GroundedPredicateNode "py:runNeuralNetwork") (ListLink (VariableNode "$X") (ConceptNode "blue")) ))))"""
-        if use_ure:
-            return '(define result (conj-bc {0})) '.format(query)
-        return '(cog-execute! ' + query + ')'
-    
     def answerOtherQuestion(self, queryInScheme):
         """
         Find answer for question with formula _det(A, B);_obj(C, D);_subj(C, A)
@@ -288,10 +321,23 @@ class PatternMatcherVqaPipeline:
         questionRecord.question = question
         questionRecord.imageId = imageId
         self.answerQuestion(questionRecord)
-    
+
+    @classmethod
+    def is_record(cls, line):
+        striped_line = line.strip()
+        if not line:
+            return False
+        if cls.header in striped_line:
+            return False
+        if striped_line.startswith('#'):
+            return False
+        return True
+
     def answerQuestionsFromFile(self, questionsFileName):
         questionFile = open(questionsFileName, 'r')
         for line in questionFile:
+            if not self.is_record(line):
+                continue
             try:
                 record = Record.fromString(line)
                 self.answerQuestion(record)
@@ -300,124 +346,128 @@ class PatternMatcherVqaPipeline:
                 continue
     
 ### MAIN
-
 question2atomeseLibraryPath = (currentDir(__file__) +
     '/../question2atomese/target/question2atomese-1.0-SNAPSHOT.jar')
 
-parser = argparse.ArgumentParser(description='Load pretrained words models '
-   'and answer questions using OpenCog PatternMatcher')
-parser.add_argument('--model-kind', '-k', dest='kindOfModel',
-    action='store', type=str, required=True,
-    choices=['MULTIDNN', 'HYPERNET', 'SPLITMULTIDNN'],
-    help='model kind: (1) MULTIDNN and SPLITMULTIDNN requires --model parameter only; '
-    '(2) HYPERNET requires --model, --words and --embedding parameters')
-parser.add_argument('--questions', '-q', dest='questionsFileName',
-    action='store', type=str, required=True,
-    help='parsed questions file name')
-parser.add_argument('--multidnn-model', dest='multidnnModelFileName',
-    action='store', type=str,
-    help='Multi DNN model file name')
-parser.add_argument('--hypernet-model', dest='hypernetModelFileName',
-    action='store', type=str,
-    help='Hypernet model file name')
-parser.add_argument('--hypernet-words', '-w', dest='hypernetWordsFileName',
-    action='store', type=str,
-    help='words dictionary')
-parser.add_argument('--hypernet-embeddings', '-e',dest='hypernetWordEmbeddingsFileName',
-    action='store', type=str,
-    help='word embeddings')
-parser.add_argument('--features-extractor-kind', dest='kindOfFeaturesExtractor',
-    action='store', type=str, required=True,
-    choices=['PRECALCULATED', 'IMAGE'],
-    help='features extractor type: (1) PRECALCULATED loads precalculated features; '
-    '(2) IMAGE extract features from images on the fly')
-parser.add_argument('--precalculated-features', '-f', dest='precalculatedFeaturesPath',
-    action='store', type=str,
-    help='precalculated features path (it can be either zip archive or folder name)')
-parser.add_argument('--precalculated-features-prefix', dest='precalculatedFeaturesPrefix',
-    action='store', type=str, default='val2014_parsed_features/COCO_val2014_',
-    help='precalculated features prefix to be merged with path to open feature')
-parser.add_argument('--images', '-i', dest='imagesPath',
-    action='store', type=str,
-    help='path to images, required only when featur')
-parser.add_argument('--images-prefix', dest='imagesPrefix',
-    action='store', type=str, default='val2014/COCO_val2014_',
-    help='image file prefix to be merged with path to open image')
-parser.add_argument('--atomspace', '-a', dest='atomspaceFileName',
-    action='store', type=str,
-    help='Scheme program to fill atomspace with facts')
-parser.add_argument('--opencog-log-level', dest='opencogLogLevel',
-    action='store', type = str, default='NONE',
-    choices=['FINE', 'DEBUG', 'INFO', 'ERROR', 'NONE'],
-    help='OpenCog logging level')
-parser.add_argument('--python-log-level', dest='pythonLogLevel',
-    action='store', type = str, default='INFO',
-    choices=['INFO', 'DEBUG', 'ERROR'], 
-    help='Python logging level')
-parser.add_argument('--question2atomese-java-library',
-    dest='q2aJarFilenName', action='store', type = str,
-    default=question2atomeseLibraryPath,
-    help='path to question2atomese-<version>.jar')
-args = parser.parse_args()
 
-# global variables
-neuralNetworkRunner = None
+def parse_args():
+    parser = argparse.ArgumentParser(description='Load pretrained words models '
+       'and answer questions using OpenCog PatternMatcher')
+    parser.add_argument('--model-kind', '-k', dest='kindOfModel',
+        action='store', type=str, required=True,
+        choices=['MULTIDNN', 'HYPERNET', 'SPLITMULTIDNN'],
+        help='model kind: (1) MULTIDNN and SPLITMULTIDNN requires --model parameter only; '
+        '(2) HYPERNET requires --model, --words and --embedding parameters')
+    parser.add_argument('--questions', '-q', dest='questionsFileName',
+        action='store', type=str, required=True,
+        help='parsed questions file name')
+    parser.add_argument('--multidnn-model', dest='multidnnModelFileName',
+        action='store', type=str,
+        help='Multi DNN model file name')
+    parser.add_argument('--hypernet-model', dest='hypernetModelFileName',
+        action='store', type=str,
+        help='Hypernet model file name')
+    parser.add_argument('--hypernet-words', '-w', dest='hypernetWordsFileName',
+        action='store', type=str,
+        help='words dictionary')
+    parser.add_argument('--hypernet-embeddings', '-e',dest='hypernetWordEmbeddingsFileName',
+        action='store', type=str,
+        help='word embeddings')
+    parser.add_argument('--features-extractor-kind', dest='kindOfFeaturesExtractor',
+        action='store', type=str, required=True,
+        choices=['PRECALCULATED', 'IMAGE'],
+        help='features extractor type: (1) PRECALCULATED loads precalculated features; '
+        '(2) IMAGE extract features from images on the fly')
+    parser.add_argument('--precalculated-features', '-f', dest='precalculatedFeaturesPath',
+        action='store', type=str,
+        help='precalculated features path (it can be either zip archive or folder name)')
+    parser.add_argument('--precalculated-features-prefix', dest='precalculatedFeaturesPrefix',
+        action='store', type=str, default='val2014_parsed_features/COCO_val2014_',
+        help='precalculated features prefix to be merged with path to open feature')
+    parser.add_argument('--images', '-i', dest='imagesPath',
+        action='store', type=str,
+        help='path to images, required only when featur')
+    parser.add_argument('--images-prefix', dest='imagesPrefix',
+        action='store', type=str, default='val2014/COCO_val2014_',
+        help='image file prefix to be merged with path to open image')
+    parser.add_argument('--atomspace', '-a', dest='atomspaceFileName',
+        action='store', type=str,
+        help='Scheme program to fill atomspace with facts')
+    parser.add_argument('--opencog-log-level', dest='opencogLogLevel',
+        action='store', type = str, default='NONE',
+        choices=['FINE', 'DEBUG', 'INFO', 'ERROR', 'NONE'],
+        help='OpenCog logging level')
+    parser.add_argument('--python-log-level', dest='pythonLogLevel',
+        action='store', type = str, default='INFO',
+        choices=['INFO', 'DEBUG', 'ERROR'], 
+        help='Python logging level')
+    parser.add_argument('--question2atomese-java-library',
+        dest='q2aJarFilenName', action='store', type = str,
+        default=question2atomeseLibraryPath,
+        help='path to question2atomese-<version>.jar')
+    args = parser.parse_args()
+    return args
 
-initializeRootAndOpencogLogger(args.opencogLogLevel, args.pythonLogLevel)
 
-logger = logging.getLogger('PatternMatcherVqaTest')
-logger.info('VqaMainLoop started')
-
-jpype.startJVM(jpype.getDefaultJVMPath(), 
-               '-Djava.class.path=' + str(args.q2aJarFilenName))
-try:
+def main():
+    args = parse_args()
+    initializeRootAndOpencogLogger(args.opencogLogLevel, args.pythonLogLevel)
     
-    if args.kindOfFeaturesExtractor == 'IMAGE':
-        from feature.image import ImageFeatureExtractor
-        featureExtractor = ImageFeatureExtractor(
-            # TODO: replace by arguments
-            '/mnt/fileserver/shared/vital/image-features/test.prototxt',
-            '/mnt/fileserver/shared/vital/image-features/resnet101_faster_rcnn_final_iter_320000_for_36_bboxes.caffemodel',
-            args.imagesPath,
-            args.imagesPrefix
-            )
-    elif args.kindOfFeaturesExtractor == 'PRECALCULATED':
-        featureExtractor = TsvFileFeatureLoader(args.precalculatedFeaturesPath,
-                                         args.precalculatedFeaturesPrefix)
-    else:
-        raise ValueError('Unexpected args.kindOfFeaturesExtractor value: {}'
-                         .format(args.kindOfFeaturesExtractor))
+    logger = logging.getLogger('PatternMatcherVqaTest')
+    logger.info('VqaMainLoop started')
+    
+    jpype.startJVM(jpype.getDefaultJVMPath(), 
+                   '-Djava.class.path=' + str(args.q2aJarFilenName))
+    try:
+        
+        if args.kindOfFeaturesExtractor == 'IMAGE':
+            from feature.image import ImageFeatureExtractor
+            featureExtractor = ImageFeatureExtractor(
+                # TODO: replace by arguments
+                '/mnt/fileserver/shared/vital/image-features/test.prototxt',
+                '/mnt/fileserver/shared/vital/image-features/resnet101_faster_rcnn_final_iter_320000_for_36_bboxes.caffemodel',
+                args.imagesPath,
+                args.imagesPrefix
+                )
+        elif args.kindOfFeaturesExtractor == 'PRECALCULATED':
+            featureExtractor = TsvFileFeatureLoader(args.precalculatedFeaturesPath,
+                                             args.precalculatedFeaturesPrefix)
+        else:
+            raise ValueError('Unexpected args.kindOfFeaturesExtractor value: {}'
+                             .format(args.kindOfFeaturesExtractor))
+    
+        questionConverter = jpype.JClass('org.opencog.vqa.relex.QuestionToOpencogConverter')()
+        atomspace = initialize_atomspace(args.atomspaceFileName)
+        statisticsAnswerHandler = StatisticsAnswerHandler()
+        if (args.kindOfModel == 'MULTIDNN'):
+            network_runner.runner = NetsVocabularyNeuralNetworkRunner(args.multidnnModelFileName)
+        elif (args.kindOfModel == 'SPLITMULTIDNN'):
+            network_runner.runner = SplitMultidnnRunner(args.multidnnModelFileName)
+        elif (args.kindOfModel == 'HYPERNET'):
+            network_runner.runner = HyperNetNeuralNetworkRunner(args.hypernetWordsFileName,
+                            args.hypernetWordEmbeddingsFileName, args.hypernetModelFileName)
+        else:
+            raise ValueError('Unexpected args.kindOfModel value: {}'.format(args.kindOfModel))
+        
+        pmVqaPipeline = PatternMatcherVqaPipeline(featureExtractor,
+                                                  questionConverter,
+                                                  atomspace,
+                                                  statisticsAnswerHandler)
+        pmVqaPipeline.answerQuestionsFromFile(args.questionsFileName)
+        
+        print('Questions processed: {0}, answered: {1}, correct answers: {2}% ({3}), unaswered {4}%'
+              .format(statisticsAnswerHandler.processedQuestions,
+                      statisticsAnswerHandler.questionsAnswered,
+                      statisticsAnswerHandler.correctAnswerPercent(),
+                      statisticsAnswerHandler.correctAnswers,
+                      statisticsAnswerHandler.unanswered_percent()))
+        with open("unanswered.txt", 'w') as f:
+            for record in statisticsAnswerHandler.getUnanswered():
+                f.write(record.toString() + '\n')
+    finally:
+        jpype.shutdownJVM()
+    
+    logger.info('VqaMainLoop stopped')
 
-    questionConverter = jpype.JClass('org.opencog.vqa.relex.QuestionToOpencogConverter')()
-    atomspace = initialize_atomspace(args.atomspaceFileName)
-    statisticsAnswerHandler = StatisticsAnswerHandler()
-    
-    if (args.kindOfModel == 'MULTIDNN'):
-        neuralNetworkRunner = NetsVocabularyNeuralNetworkRunner(args.multidnnModelFileName)
-    elif (args.kindOfModel == 'SPLITMULTIDNN'):
-        neuralNetworkRunner = SplitMultidnnRunner(args.multidnnModelFileName)
-    elif (args.kindOfModel == 'HYPERNET'):
-        neuralNetworkRunner = HyperNetNeuralNetworkRunner(args.hypernetWordsFileName,
-                        args.hypernetWordEmbeddingsFileName, args.hypernetModelFileName)
-    else:
-        raise ValueError('Unexpected args.kindOfModel value: {}'.format(args.kindOfModel))
-    
-    pmVqaPipeline = PatternMatcherVqaPipeline(featureExtractor,
-                                              questionConverter,
-                                              atomspace,
-                                              statisticsAnswerHandler)
-    pmVqaPipeline.answerQuestionsFromFile(args.questionsFileName)
-    
-    print('Questions processed: {0}, answered: {1}, correct answers: {2}% ({3}), unaswered {4}%'
-          .format(statisticsAnswerHandler.processedQuestions,
-                  statisticsAnswerHandler.questionsAnswered,
-                  statisticsAnswerHandler.correctAnswerPercent(),
-                  statisticsAnswerHandler.correctAnswers,
-                  statisticsAnswerHandler.unanswered_percent()))
-    with open("unanswered.txt", 'w') as f:
-        for record in statisticsAnswerHandler.get_unanswered():
-            f.write(record.toString() + '\n')
-finally:
-    jpype.shutdownJVM()
-
-logger.info('VqaMainLoop stopped')
+if __name__ == '__main__':
+    main()
