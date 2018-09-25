@@ -2,9 +2,6 @@
 
 (load-from-path "conjunction-rule-base-config.scm")
 
-(Concept "BB1")
-(Concept "BB2")
-(Concept "BoundingBox")
 
 (Inheritance (stv 0.99 0.99) (Concept "BB1") (Concept "BoundingBox"))
 ; default truth value 1.0 0.0 give 1.0 0 for any inference 
@@ -24,18 +21,14 @@
 (define RedBox1
     (EvaluationLink
          (GroundedPredicateNode  "scm: redness")
-         (ListLink (
-                    TypedVariableLink (Variable "$X"))
-                    )
+         (Variable "$X")
     )
 )
 
 (define RedBox2
    (EvaluationLink (stv 0.56 0.7)
          Red
-         (ListLink(
-             ConceptNode "BB2"
-              ))
+         (ConceptNode "BB2")
    )
 )
 
