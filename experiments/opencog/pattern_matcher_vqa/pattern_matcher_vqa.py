@@ -9,6 +9,9 @@ import numpy as np
 import opencog.logger
 import network_runner
 
+#ignore useless warnings
+import warnings
+warnings.filterwarnings('ignore')
 from opencog.atomspace import TruthValue
 from opencog.type_constructors import *
 from opencog.scheme_wrapper import *
