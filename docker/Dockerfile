@@ -46,7 +46,7 @@ WORKDIR /home/Downloads/
 
 
 # build tools
-RUN apt install -y libboost-python-dev libblas-dev libboost-thread-dev libboost-filesystem-dev libboost-system-dev
+RUN apt install -y libboost-python-dev libblas-dev libboost-thread-dev libboost-filesystem-dev libboost-system-dev postgresql-server-dev-10
 RUN apt install -y cmake libboost-program-options-dev libboost-regex-dev libiberty-dev guile-2.2-dev protobuf-compiler uuid-dev
 
 # Conda
@@ -205,5 +205,19 @@ RUN echo "c.NotebookApp.password_required = False" >> /home/relex/.jupyter/jupyt
 RUN echo "c.NotebookApp.port = 8888" >> /home/relex/.jupyter/jupyter_notebook_config.py
 
 RUN chmod +x /home/relex/projects/semantic-vision-1/experiments/opencog/pattern_matcher_vqa/vqa
+
+#cleanup
+RUN rm -r /home/relex/miniconda3/pkgs/*
+RUN sudo apt-get remove gcc g++ make swig ant libboost-python-dev libblas-dev libboost-thread-dev libboost-filesystem-dev libboost-system-dev postgresql-server-dev-10 maven screen telnet netcat-openbsd byobu autotools-dev binutils binutils-common binutils-x86-64-linux-gnu cpp cpp-7 \
+  dh-python dirmngr fakeroot g++-7 gcc-7 libboost-atomic1.65-dev libboost-chrono1.65-dev \
+  libboost-date-time1.65-dev \
+  libboost-filesystem1.65-dev \
+  libboost-python1.65-dev \
+  libboost-serialization1.65-dev \
+  libboost-system1.65-dev  libboost-thread1.65-dev \
+  libgmp-dev libgraphite2-dev \
+  libpcre3-dev libpython2.7-dev libpython3-dev libpython3.6-dev libreadline-dev libtinfo-dev \
+  python-dev python2.7-dev libltdl-dev \
+  python3-dev python3.6-dev swig3.0 zlib1g-dev -y
 
 CMD /home/relex/projects/semantic-vision-1/experiments/opencog/pattern_matcher_vqa/vqa
